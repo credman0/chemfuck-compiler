@@ -1,5 +1,6 @@
-use crate::{Chemical, ChemToken};
+use crate::{Chemical, ChemToken, NumberToken, NumberOperator};
 use std::collections::HashMap;
+use std::boxed::Box;
 
 #[derive(Debug, Default)]
 pub struct ParseError {
@@ -7,15 +8,6 @@ pub struct ParseError {
     msg:String
 }
 
-enum NumberToken {
-    Constant(u32),
-    Calculated(NumberOperator)
-}
-
-enum NumberOperator {
-    Divide(u32),
-    Multiply(u32)
-}
 const AMMONIA:&str = "($/1:hydrogen;$/3:nitrogen;)";
 const DIETHYLAMINE:&str = "($/2:ethanol;$/2:*AMMONIA;)@374;";
 const OIL:&str = "($/2:weldingfuel;$/2:carbon;$/2:hydrogen;)";
@@ -72,7 +64,7 @@ pub fn parse(string:String) -> Result<ChemToken, ParseError> {
     parse_group_or_base(&mut tokens, None)
 }
 
-fn parse_quantity(string:String, quantity:u32) -> Result<ChemToken, ParseError> {
+fn parse_quantity(string:String, quantity:NumberToken) -> Result<ChemToken, ParseError> {
     let mut tokens = tokenize(string);
     parse_group_or_base(&mut tokens, Some(quantity))
 }
@@ -81,40 +73,18 @@ fn tokenize(string:String) -> Vec<char> {
     return string.chars().rev().collect()
 }
 
-fn parse_group_or_base(tokens: &mut Vec<char>, last_quantity:Option<u32>) -> Result<ChemToken, ParseError> {
+fn parse_group_or_base(tokens: &mut Vec<char>, last_quantity:Option<NumberToken>) -> Result<ChemToken, ParseError> {
     let quantity = parse_number(tokens)?;
     assert_token(tokens, ':')?;
     if tokens.is_empty() {
         return Err(ParseError::with_msg(tokens.len() as u32, "missing (, end of feed"));
     }
-    let quantity = match quantity {
-        NumberToken::Constant(val) => {
-            val
-        },
-        NumberToken::Calculated(operator) => {
-            if last_quantity.is_none() {
-                panic!("operator without matching operand")
-            }
-            match operator {
-                NumberOperator::Divide(amount) => {
-                    div_up(last_quantity.unwrap(),amount)
-                },
-                NumberOperator::Multiply(amount) => {
-                    last_quantity.unwrap()*amount
-                },
-            }
-        }
-    };
     let next = peek(tokens)?;
     match next {
         '(' => return parse_group(tokens, quantity),
         '*' => return parse_subbed_chem(tokens, quantity),
         _ => return parse_base_chem(tokens, quantity)
     }
-}
-
-pub fn div_up(a: u32, b: u32) -> u32 {
-    (a + (b - 1))/b
 }
 
 fn assert_token(tokens: &mut Vec<char>, matches:char) -> Result<(), ParseError> {
@@ -130,22 +100,22 @@ fn assert_token(tokens: &mut Vec<char>, matches:char) -> Result<(), ParseError> 
     }
 }
 
-fn parse_subbed_chem(tokens: &mut Vec<char>, quantity:u32) -> Result<ChemToken, ParseError> {
+fn parse_subbed_chem(tokens: &mut Vec<char>, quantity:NumberToken) -> Result<ChemToken, ParseError> {
     assert_token(tokens, '*')?;
     let name = parse_name(tokens)?;
     let formula = get_substitute_formula(name);
-    let mut result = parse(format!("{}:{}", quantity, formula))?;
+    let mut result = parse(format!("{}:{}", quantity.as_text(), formula))?;
     let priority = parse_priority(tokens)?;
     result.priority = priority;
     return Ok(result);
 }
 
 /// chem group of format "50:(<chem>,..)@<temp>;" where the "@<temp>;" is optional
-fn parse_group(tokens: &mut Vec<char>, quantity:u32) -> Result<ChemToken, ParseError> {
+fn parse_group(tokens: &mut Vec<char>, quantity:NumberToken) -> Result<ChemToken, ParseError> {
     let mut chems = vec![];
     assert_token(tokens, '(')?;
     while peek(tokens)?!=')' {
-        chems.push(parse_group_or_base(tokens, Some(quantity))?);
+        chems.push(parse_group_or_base(tokens, Some(quantity.clone()))?);
         if tokens.is_empty() {
             return Err(ParseError::with_msg(tokens.len() as u32, "missing ), end of feed"));
         }
@@ -173,7 +143,7 @@ fn parse_group(tokens: &mut Vec<char>, quantity:u32) -> Result<ChemToken, ParseE
         temp = None;
     }
     let priority = parse_priority(tokens)?;
-    return Ok(ChemToken {quantity:quantity, priority, chemical: Chemical {chemicals:chems, temp:temp, ..Default::default()}});
+    return Ok(ChemToken {quantity:quantity, priority, concrete_quantity:None, chemical: Chemical {chemicals:chems, temp:temp, ..Default::default()}});
 }
 
 fn parse_priority(tokens: &mut Vec<char>) -> Result<u32, ParseError> {
@@ -205,10 +175,10 @@ fn peek(tokens: &Vec<char>) -> Result<char, ParseError> {
 }
 
 /// basic chem of format "<amount>:<name>;" ie "50:nitrogen;"
-fn parse_base_chem(tokens: &mut Vec<char>, quantity:u32) -> Result<ChemToken, ParseError> {
+fn parse_base_chem(tokens: &mut Vec<char>, quantity:NumberToken) -> Result<ChemToken, ParseError> {
     let chem_name = parse_name(tokens)?;
     let priority = parse_priority(tokens)?;
-    return Ok(ChemToken {quantity:quantity, priority, chemical: Chemical {name:Some(chem_name), ..Default::default()}});
+    return Ok(ChemToken {quantity:quantity, priority, concrete_quantity:None, chemical: Chemical {name:Some(chem_name), ..Default::default()}});
 }
 
 fn parse_name(tokens: &mut Vec<char>) -> Result<String, ParseError> {
@@ -247,9 +217,16 @@ fn parse_number(tokens: &mut Vec<char>) -> Result<NumberToken,ParseError> {
         return Ok(NumberToken::Constant(sum));
     } else if peek_res == '$' {
         assert_token(tokens, '$')?;
+        let peek_res = peek(tokens).unwrap();
+        let numerator;
+        if peek_res.is_digit(10) {
+            numerator = parse_digit(tokens).unwrap();
+        } else {
+            numerator = 1;
+        }
         assert_token(tokens, '/')?;
         let digit = parse_digit(tokens).unwrap();
-        return Ok(NumberToken::Calculated(NumberOperator::Divide(digit)))
+        return Ok(NumberToken::Calculated(NumberOperator::new(numerator,digit)))
     } else {
         return Err(ParseError::with_msg(tokens.len() as u32, format!("number parse error, NAN: {}", peek_res).as_str()));
     }

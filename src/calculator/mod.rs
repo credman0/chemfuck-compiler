@@ -1,4 +1,4 @@
-use crate::{Chemical, ChemToken};
+use crate::{Chemical, ChemToken, NumberToken};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 
@@ -32,13 +32,44 @@ pub struct ChemState {
     chems:Vec<Reservoir>
 }
 
-#[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Reservoir {
     contents:Option<ChemToken>,
-    max_size:u32
+    reservoir_size:ReservoirSize
 }
 
 const NUM_RESERVOIRS:u32 = 10;
+const SMALL_RESERVOIR:u32 = 50;
+const LARGE_RESERVOIR:u32 = 100;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+enum ReservoirSize {
+    Empty,
+    Small,
+    Large
+}
+
+impl ReservoirSize {
+    fn get_size(&self) -> u32{
+        match self {
+            ReservoirSize::Empty => 0,
+            ReservoirSize::Small => SMALL_RESERVOIR,
+            ReservoirSize::Large => LARGE_RESERVOIR
+        }
+    }
+
+    fn fit(size:u32) -> ReservoirSize {
+        if size == 0 {
+            return ReservoirSize::Empty;
+        } else if size <= 50 {
+            return ReservoirSize::Small;
+        } else if size <= 100 {
+            return ReservoirSize::Large;
+        } else {
+            panic!("No reservoir large enough to fit")
+        }
+    }
+}
 
 impl Reservoir {
     pub fn add(&mut self, chem:&ChemToken) {
@@ -46,18 +77,33 @@ impl Reservoir {
     }
 
     pub fn new(contents:&ChemToken) -> Reservoir {
-        Reservoir {contents:Some(contents.clone()), max_size:contents.size()}
+        Reservoir {contents:Some(contents.clone()), reservoir_size:ReservoirSize::fit(contents.size())}
     }
 
     pub fn empty() -> Reservoir {
-        Reservoir {contents:None, max_size:0}
+        Reservoir {contents:None, reservoir_size:ReservoirSize::Empty}
     }
 
-    pub fn replace(&mut self, chem:&ChemToken) {
-        if self.max_size < chem.quantity {
-            self.max_size = chem.quantity;
+    pub fn upgrade_size(&mut self) -> Result<(), String> {
+        match self.reservoir_size {
+            ReservoirSize::Empty => {
+                self.reservoir_size = ReservoirSize::Small;
+                return Ok(());
+            },
+            ReservoirSize::Small => {
+                self.reservoir_size = ReservoirSize::Large;
+                return Ok(());
+            },
+            ReservoirSize::Large => return Err("Tried to upgrade large reservoir: Insufficient space!".to_string())
+        }
+    }
+
+    pub fn replace(&mut self, chem:&ChemToken) -> Result<(), String> {
+        if self.reservoir_size.get_size() < chem.size() {
+            self.reservoir_size = ReservoirSize::fit(chem.size());
         }
         self.contents = Some(chem.clone());
+        return Ok(());
     }
 
     pub fn clear(&mut self) {
@@ -65,7 +111,8 @@ impl Reservoir {
     }
 
     pub fn reduce(&mut self, amount:u32) {
-        self.contents.as_mut().unwrap().quantity -= amount;
+        *self.contents.as_mut().unwrap().concrete_quantity.as_mut().unwrap() -= amount;
+        self.contents.as_mut().unwrap().set_children_abstract();
         // if self.contents.as_ref().unwrap().quantity == 0 {
         //     self.clear();
         // }
@@ -77,8 +124,8 @@ impl ChemState {
         let mut text = "[".to_string();
         for i in 0..self.chems.len() {
             let name:String = if self.chems[i].contents.is_some() {self.chems[i].contents.as_ref().unwrap().chemical.name.as_ref().unwrap_or(&"None".to_string()).to_string()} else {"None".to_string()};
-            let quantity:u32 = if self.chems[i].contents.is_some() {self.chems[i].contents.as_ref().unwrap().quantity} else {0};
-            text = format!("{},  r{}:({}) {}", text, i+1,quantity, name, );
+            let quantity:NumberToken = if self.chems[i].contents.is_some() {self.chems[i].contents.as_ref().unwrap().quantity.clone()} else {NumberToken::default()};
+            text = format!("{},  r{}:({}) {}", text, i+1,quantity.as_text(), name, );
         }
         return format!("{}]",text);
     }
@@ -118,7 +165,7 @@ impl ChemState {
     }
 
     pub fn replace(&mut self, index:usize, chem:&ChemToken) {
-        self.chems.get_mut(index).unwrap().replace(chem);
+        self.chems.get_mut(index).unwrap().replace(chem).unwrap();
     }
 
     pub fn clear(&mut self, index:usize) {
@@ -155,6 +202,14 @@ impl ChemState {
             self.chems.push(Reservoir::empty());
         }
     }
+
+    pub fn get_sizes(&self) -> Vec<u32> {
+        let mut sizes = vec![];
+        for reservoir in &self.chems {
+            sizes.push(reservoir.reservoir_size.get_size());
+        }
+        return sizes;
+    }
 }
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
@@ -167,7 +222,7 @@ pub struct ChemTree {
 struct ChemTreeBranch {
     chem:ChemToken,
     children:Vec<ChemTreeBranch>,
-    id:u32
+    id:u32,
 }
 
 impl ChemTreeBranch {
@@ -283,8 +338,8 @@ impl ChemTreeBranch {
                         self.dissolve_branch(branch);
                         mut_tree.dissolve_branch(branch);
                     }
-                    let counted_amount = all_chems[chem];
-                    assert_eq!(counted_amount, new_chem_token.quantity);
+                    let counted_amount = &all_chems[chem];
+                    assert_eq!(counted_amount.concrete_quantity.unwrap(), new_chem_token.concrete_quantity.unwrap());
                     println!("Adding {:?} to {}", &new_chem_token, selected_leaf.id);
                     if !self.replace_chem_in_branch(&new_chem_token, selected_leaf.id) {
                         panic!("Missing leaf");
@@ -303,17 +358,19 @@ impl ChemTreeBranch {
         }
     } 
 
-    fn bucket_chems(&self) -> HashMap<Chemical, u32> {
+    fn bucket_chems(&self) -> HashMap<Chemical, ChemToken> {
         let mut buckets = HashMap::new();
         self.bucket_chems_recursive(&mut buckets);
         return buckets;
     }
 
-    fn bucket_chems_recursive(&self,buckets:&mut HashMap<Chemical, u32>) {
+    fn bucket_chems_recursive(&self,buckets:&mut HashMap<Chemical, ChemToken>) {
         if !buckets.contains_key(&self.chem.chemical) {
-            buckets.insert(self.chem.chemical.clone(), 0);
+            buckets.insert(self.chem.chemical.clone(), self.chem.clone());
         }
-        buckets.insert(self.chem.chemical.clone(), buckets[&self.chem.chemical] + self.chem.quantity);
+        let mut new_chem = self.chem.clone();
+        new_chem.combine(&buckets[&self.chem.chemical]);
+        buckets.insert(self.chem.chemical.clone(), new_chem);
         for child in &self.children {
             child.bucket_chems_recursive(buckets);
         }
@@ -336,6 +393,16 @@ impl ChemTreeBranch {
         }
         return false;
     }
+
+    pub fn concretize_quantites (&mut self) {
+        if self.chem.quantity.is_constant() {
+            self.chem.set_concrete_quantity(0);
+        }
+        for child in &mut self.children {
+            child.chem.set_concrete_quantity(self.chem.concrete_quantity.unwrap());
+            child.concretize_quantites();
+        }
+    }
 }
 
 
@@ -352,8 +419,9 @@ impl ChemTreeBranch {
 
 impl ChemTree {
     pub fn deconstruct(token:&ChemToken) -> ChemTree {
-        let root = ChemTreeBranch::deconstruct(token, &mut AtomicU32::new(0));
-        let initial_state = compute_initial_state(token);
+        let mut root = ChemTreeBranch::deconstruct(token, &mut AtomicU32::new(0));
+        root.concretize_quantites();
+        let initial_state = compute_initial_state(&root.chem);
         return ChemTree {root, initial_state};
     }
 }
@@ -365,7 +433,7 @@ pub fn compute_initial_state (final_chem:&ChemToken) -> ChemState {
     get_temps_recursive(&mut temps_map, final_chem);
     let mut chems_vec = vec![];
     for chem in chem_map.keys() {
-        chems_vec.push(ChemToken{quantity:*chem_map.get(chem).unwrap(), chemical:chem.clone(), ..Default::default()});
+        chems_vec.push(ChemToken{quantity:NumberToken::Constant(*chem_map.get(chem).unwrap()), chemical:chem.clone(), concrete_quantity:Some(*chem_map.get(chem).unwrap()), ..Default::default()});
     }   
     return ChemState::new(&chems_vec.into_iter().map(|x| Reservoir::new(&x)).collect());
 }
@@ -375,7 +443,7 @@ fn count_raw_chems_recursive(chem_map:&mut HashMap<Chemical, u32>, chem:&ChemTok
         if !chem_map.contains_key(&chem.chemical) {
             chem_map.insert(chem.chemical.clone(), 0);
         }
-        chem_map.insert(chem.chemical.clone(), chem_map.get(&chem.chemical).unwrap() + chem.quantity);
+        chem_map.insert(chem.chemical.clone(), chem_map.get(&chem.chemical).unwrap() + chem.concrete_quantity.unwrap());
     }
     for next_chem in &chem.chemical.chemicals {
         count_raw_chems_recursive(chem_map, next_chem);
@@ -395,7 +463,7 @@ fn compress_state(state:&mut ChemState, tree:&mut ChemTree) {
 
 }
 
-pub fn compute_actions(tree:&ChemTree) -> Vec<Action> {
+pub fn compute_actions(tree:&ChemTree) -> (Vec<Action>, Vec<u32>) {
     let mut state = tree.initial_state.clone();
     while state.chems.len() > NUM_RESERVOIRS as usize {
         println!("TOO MANY CHEMICALS");
@@ -414,7 +482,7 @@ pub fn compute_actions(tree:&ChemTree) -> Vec<Action> {
     //     let reservoir_index = state.find_chem(&mut_tree.chem.chemical).unwrap();
     //     actions.push(Action::Heat{target:reservoir_index as u32, temp:mut_tree.chem.chemical.temp.unwrap()})
     // }
-    return actions;
+    return (actions,state.get_sizes());
 }
 
 fn trim_basics(tree:&mut ChemTreeBranch) {
@@ -431,7 +499,7 @@ fn emptied_chemicals(chem:&ChemToken, state:&ChemState) -> u32 {
             if reservoir.contents.is_some(){
                 let reservoir_chemical = reservoir.contents.as_ref().unwrap();
                 if reservoir_chemical.chemical == chemical.chemical {
-                    if reservoir_chemical.quantity - chemical.quantity == 0 {
+                    if reservoir_chemical.concrete_quantity.unwrap() - chemical.concrete_quantity.unwrap() == 0 {
                         emptied_count += 1;
                     }
                 }
@@ -464,15 +532,15 @@ fn compute_step(state:&mut ChemState, tree:&mut ChemTreeBranch, actions:&mut Vec
     // remove before finding an empty reservoir in case one of them opens up
     for chem in &chems {
         let reservoir_index = state.find_chem(&chem.chemical).unwrap();
-        state.reduce(reservoir_index, chem.quantity);
+        state.reduce(reservoir_index, chem.concrete_quantity.unwrap());
     }
     let mut combine_reservoir = None;
     for chem in &chems {
         let reservoir_index = state.find_chem(&chem.chemical).unwrap();
         let reservoir = state.get(reservoir_index);
-        if reservoir.contents.as_ref().unwrap().quantity == 0 {
+        if reservoir.contents.as_ref().unwrap().concrete_quantity.unwrap() == 0 {
             if combine_reservoir.is_none() {
-                actions.push(Action::EjectDownTo{amount:chem.quantity, target:reservoir_index as u32 + 1});
+                actions.push(Action::EjectDownTo{amount:chem.concrete_quantity.unwrap(), target:reservoir_index as u32 + 1});
                 combine_reservoir = Some(reservoir_index);
             }
         }
@@ -480,14 +548,14 @@ fn compute_step(state:&mut ChemState, tree:&mut ChemTreeBranch, actions:&mut Vec
 
     if combine_reservoir.is_none() {
         combine_reservoir = Some(state.first_empty());
-    }
+    }   
     let combine_reservoir = combine_reservoir.unwrap();
 
     for chem in &chems {
         let reservoir_index = state.find_chem(&chem.chemical).unwrap();
         if reservoir_index != combine_reservoir {
-            actions.push(Action::Transfer{amount:chem.quantity, target:combine_reservoir as u32 + 1, source:reservoir_index as u32 + 1});
-            if chem.quantity == 0 {
+            actions.push(Action::Transfer{amount:chem.concrete_quantity.unwrap(), target:combine_reservoir as u32 + 1, source:reservoir_index as u32 + 1});
+            if chem.concrete_quantity.unwrap() == 0 {
                 actions.push(Action::Eject{target:reservoir_index as u32 + 1});
                 state.clear(reservoir_index);
             }

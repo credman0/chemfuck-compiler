@@ -6,7 +6,7 @@ mod parser;
 mod calculator;
 mod compiler;
 
-use chemicals::{Chemical, ChemToken};
+use chemicals::{Chemical, ChemToken, NumberToken, NumberOperator};
 use calculator::Action;
 
 use std::{
@@ -33,8 +33,9 @@ fn main() {
     let args = Cli::from_args();
     let chem =  parser::parse(args.input).unwrap();
     let tree = calculator::ChemTree::deconstruct(&chem);
-    println!("{}\n\n", tree.initial_state.to_text());
-    let actions = calculator::compute_actions(&tree);
+    println!("{}\n", tree.initial_state.to_text());
+    let (actions, sizes) = calculator::compute_actions(&tree);
+    println!("{:?}\n\n", sizes);
     println!("{:?}\n", actions);
     let commands = compiler::compile(&actions);
     println!("{:?}\n", commands);
