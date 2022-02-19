@@ -114,6 +114,14 @@ fn extract_constants (actions:&Vec<Action>) -> (HashMap<u32,u32>, u32) {
             Action::EjectDownTo{target, amount} => {
                 add_constant(&mut map, target, &mut register_counter);
                 add_constant(&mut map, amount, &mut register_counter);
+            },
+            Action::CreateBottle{target, amount} => {
+                add_constant(&mut map, target, &mut register_counter);
+                add_constant(&mut map, amount, &mut register_counter);
+            },
+            Action::CreatePill{target, amount} => {
+                add_constant(&mut map, target, &mut register_counter);
+                add_constant(&mut map, amount, &mut register_counter);
             }
         }
     }
@@ -185,7 +193,25 @@ fn create_commands_from_action (commands:&mut Vec<Command>, state:&mut ProgramSt
             commands.push(state.goto_constant(MAKE_PILL));
             commands.push(Command::ToTx);
             commands.push(Command::Transfer);
-        }
+        },
+        Action::CreateBottle{target, amount} => {
+            commands.push(state.goto_constant(target));
+            commands.push(Command::ToSx);
+            commands.push(state.goto_constant(amount));
+            commands.push(Command::ToAx);
+            commands.push(state.goto_constant(MAKE_VIAL));
+            commands.push(Command::ToTx);
+            commands.push(Command::Transfer);
+        },
+        Action::CreatePill{target, amount} => {
+            commands.push(state.goto_constant(target));
+            commands.push(Command::ToSx);
+            commands.push(state.goto_constant(amount));
+            commands.push(Command::ToAx);
+            commands.push(state.goto_constant(MAKE_PILL));
+            commands.push(Command::ToTx);
+            commands.push(Command::Transfer);
+        },
     }
 }
 
@@ -246,5 +272,5 @@ pub fn to_bytecode (commands:&Vec<Command>) -> String {
         };
         code = format!("{}{}",code,command_code);
     }
-    return code;
+    return format!("{}~",code);
 }

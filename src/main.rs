@@ -31,10 +31,13 @@ struct Cli {
 
 fn main() {
     let args = Cli::from_args();
-    let chem =  parser::parse(args.input).unwrap();
+    let (chem, total_quantity) =  parser::parse(args.input);
+    let chem = chem.unwrap();
     let tree = calculator::ChemTree::deconstruct(&chem);
+    let mut tree = tree.clone();
+    tree.initial_state.multiply(total_quantity);
     println!("{}\n", tree.initial_state.to_text());
-    let (actions, sizes) = calculator::compute_actions(&tree);
+    let (actions, sizes) = calculator::compute_actions(&tree, total_quantity);
     println!("{:?}\n\n", sizes);
     println!("{:?}\n", actions);
     let commands = compiler::compile(&actions);

@@ -20,6 +20,14 @@ const PHLOGISTON:&str = "($/4:*STABILIZING_AGENT;!1;$/4:phosphorus;$/4:plasma;$/
 const LIQUID_DARK_MATTER:&str = "($/4:*STABILIZING_AGENT;!1;$/4:radium;$/4:plasma;$/4:carbon;)";
 const SMOKE_POWDER:&str = "($/3:*STABILIZING_AGENT;!1;$/3:potassium;$/3:sugar;$/3:phosphorus;)";
 const FLUOROSURFACTANT:&str = "($/3:fluorine;$/3:*OIL;$/3:*SULFURIC_ACID;)";
+const ACETONE:&str = "($/3:*OIL;$/3:weldingfuel;$/3:oxygen;)";
+const ATRAZINE:&str = "($/3:chlorine;$/3:nitrogen;$/3:hydrogen;)";
+const PHENOL:&str = "($/3:*OIL;$/3:chlorine;$/3:water;)";
+const SALICYLIC_ACID:&str = "($/5:sodium;$/5:*PHENOL;$/5:carbon;$/5:oxygen;$/5:*SULFURIC_ACID;)";
+const PERFLUORODECALIN:&str = "($/2:hydrogen;$/2:*SALICYLIC_ACID;$/2:fluorine;)@374;";
+const PENTETIC_ACID:&str = "($/6:weldingfuel;$/6:chlorine;$/6:fluorine;$/6:*AMMONIA;$/6:*FORMALDEHYDE;$/6:*CYANIDE;)";
+const FORMALDEHYDE:&str = "($/2:ethanol;$/2:oxygen;$/2:silver;)@424;";
+const CYANIDE:&str = "($/1:*AMMONIA;$/1:*OIL;$/1:oxygen;)@374;";
 
 
 lazy_static!{
@@ -36,6 +44,15 @@ lazy_static!{
         ("LIQUID_DARK_MATTER", LIQUID_DARK_MATTER),
         ("SMOKE_POWDER", SMOKE_POWDER),
         ("FLUOROSURFACTANT", FLUOROSURFACTANT),
+        ("ACETONE", ACETONE),
+        ("ATRAZINE", ATRAZINE),
+        ("PHENOL", PHENOL),
+        ("SALICYLIC_ACID", SALICYLIC_ACID),
+        ("PHENOL", PHENOL),
+        ("PERFLUORODECALIN", PERFLUORODECALIN),
+        ("PENTETIC_ACID", PENTETIC_ACID),
+        ("FORMALDEHYDE", FORMALDEHYDE),
+        ("CYANIDE", CYANIDE),
     ].iter().copied().collect();
 }
 
@@ -59,9 +76,22 @@ impl ParseError {
     }
 }
 
-pub fn parse(string:String) -> Result<ChemToken, ParseError> {
+pub fn parse(string:String) -> (Result<ChemToken, ParseError>, u32) {
     let mut tokens = tokenize(string);
-    parse_group_or_base(&mut tokens, None)
+    let mut tokens_copy = tokens.clone();
+    let final_quantity;
+    let quantity = parse_number(&mut tokens_copy).unwrap();
+    let maybe_x = peek(&tokens_copy).unwrap();
+    if maybe_x == 'x' {
+        assert_token(&mut tokens_copy, 'x').unwrap();
+        final_quantity = match quantity {
+            NumberToken::Constant(val) => {val},
+            _ => panic!("Invalid term in constant")
+        }
+    } else {
+        final_quantity = 1;
+    }
+    (if maybe_x == 'x' {parse_group_or_base(&mut tokens_copy, None)} else {parse_group_or_base(&mut tokens, None)}, final_quantity)
 }
 
 fn parse_quantity(string:String, quantity:NumberToken) -> Result<ChemToken, ParseError> {
@@ -104,7 +134,8 @@ fn parse_subbed_chem(tokens: &mut Vec<char>, quantity:NumberToken) -> Result<Che
     assert_token(tokens, '*')?;
     let name = parse_name(tokens)?;
     let formula = get_substitute_formula(name);
-    let mut result = parse(format!("{}:{}", quantity.as_text(), formula))?;
+    let (result, _) = parse(format!("{}:{}", quantity.as_text(), formula));
+    let mut result = result.unwrap();
     let priority = parse_priority(tokens)?;
     result.priority = priority;
     return Ok(result);

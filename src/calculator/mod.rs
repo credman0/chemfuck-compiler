@@ -19,7 +19,9 @@ pub enum Action {
     Heat{temp:u32, target:u32},
     Eject{target:u32},
     DumpByproduct{target:u32, remaining:u32},
-    EjectDownTo{target:u32, amount:u32}
+    EjectDownTo{target:u32, amount:u32},
+    CreateBottle{target:u32, amount:u32},
+    CreatePill{target:u32, amount:u32}
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -117,9 +119,26 @@ impl Reservoir {
         //     self.clear();
         // }
     }
+
+    pub fn multiply(&mut self, amount:u32) {
+        if self.contents.is_none() {
+            return;
+        }
+        *self.contents.as_mut().unwrap().concrete_quantity.as_mut().unwrap()*=amount;
+        self.contents.as_mut().unwrap().quantity = NumberToken::Constant(self.contents.as_ref().unwrap().concrete_quantity.unwrap());
+        if self.reservoir_size.get_size() < self.contents.as_ref().unwrap().size() {
+            self.reservoir_size = ReservoirSize::fit(self.contents.as_ref().unwrap().size());
+        }
+    }
 }
 
 impl ChemState {
+    pub fn multiply(&mut self, amount:u32) {
+        for reservoir in &mut self.chems {
+            reservoir.multiply(amount);
+        }
+    }
+
     pub fn to_text(&self) -> String{
         let mut text = "[".to_string();
         for i in 0..self.chems.len() {
@@ -463,26 +482,47 @@ fn compress_state(state:&mut ChemState, tree:&mut ChemTree) {
 
 }
 
-pub fn compute_actions(tree:&ChemTree) -> (Vec<Action>, Vec<u32>) {
+pub fn compute_actions(tree:&ChemTree, times_produced:u32) -> (Vec<Action>, Vec<u32>) {
     let mut state = tree.initial_state.clone();
     while state.chems.len() > NUM_RESERVOIRS as usize {
         println!("TOO MANY CHEMICALS");
         panic!();
     }
-    let mut mut_tree = tree.root.clone();
-    // mut_tree.simplify();
-    trim_basics(&mut mut_tree);
-    let mut actions = vec![];
-    while !mut_tree.children.is_empty() {
-        compute_step(&mut state, &mut mut_tree, &mut actions);
+
+    let allowed_mix_reservoirs_min_index;
+    if times_produced > 1 {
+        allowed_mix_reservoirs_min_index = find_intially_empty(&state);
+    } else {
+        allowed_mix_reservoirs_min_index = 0;
     }
-    compute_step(&mut state, &mut mut_tree, &mut actions);
+    let mut actions = vec![];
+    for _ in 0..times_produced {
+        let mut mut_tree = tree.root.clone();
+        // mut_tree.simplify();
+        trim_basics(&mut mut_tree);
+        while !mut_tree.children.is_empty() {
+            compute_step(&mut state, &mut mut_tree, &mut actions, allowed_mix_reservoirs_min_index);
+        }
+        compute_step(&mut state, &mut mut_tree, &mut actions, allowed_mix_reservoirs_min_index); // final mix step
+        let output_chem = &tree.root.chem;
+        let output_reservoir_index = state.find_chem(&output_chem.chemical).unwrap();
+        actions.push(Action::CreateBottle{target:output_reservoir_index as u32 + 1, amount:100});
+        state.clear(output_reservoir_index);
+        for i in allowed_mix_reservoirs_min_index..NUM_RESERVOIRS {
+            state.clear(i as usize);
+        }
+    }
     // if mut_tree.chem.chemical.temp.is_some() {
     //     println!("\n\nSTATE: {:?}\n CHEM: {:?}", state, &mut_tree.chem.chemical);
     //     let reservoir_index = state.find_chem(&mut_tree.chem.chemical).unwrap();
     //     actions.push(Action::Heat{target:reservoir_index as u32, temp:mut_tree.chem.chemical.temp.unwrap()})
     // }
+    
     return (actions,state.get_sizes());
+}
+
+fn find_intially_empty(initial_state:&ChemState) -> u32 {
+    return initial_state.first_empty() as u32;
 }
 
 fn trim_basics(tree:&mut ChemTreeBranch) {
@@ -492,7 +532,7 @@ fn trim_basics(tree:&mut ChemTreeBranch) {
     }
 }
 
-fn emptied_chemicals(chem:&ChemToken, state:&ChemState) -> u32 {
+fn emptied_chemicals(chem:&ChemToken, state:&ChemState, allowed_mix_reservoirs_min_index:u32) -> u32 {
     let mut emptied_count = 0;
     for chemical in &chem.chemical.chemicals {
         for reservoir in &state.chems {
@@ -509,7 +549,7 @@ fn emptied_chemicals(chem:&ChemToken, state:&ChemState) -> u32 {
     return emptied_count;
 }
 
-fn compute_step(state:&mut ChemState, tree:&mut ChemTreeBranch, actions:&mut Vec<Action>) -> u32{
+fn compute_step(state:&mut ChemState, tree:&mut ChemTreeBranch, actions:&mut Vec<Action>, allowed_mix_reservoirs_min_index:u32) -> u32{
     let mut leaves = tree.get_leaves();
     leaves.sort_by(|x1,x2| {
         x2.chem.priority.cmp(&x1.chem.priority)
@@ -517,10 +557,10 @@ fn compute_step(state:&mut ChemState, tree:&mut ChemTreeBranch, actions:&mut Vec
     let max_priority = leaves.first().unwrap().chem.priority;
     leaves.retain(|x| x.chem.priority == max_priority);
     let mut picked = leaves.first().unwrap();
-    let mut max_emptied = emptied_chemicals(&picked.chem, state);
+    let mut max_emptied = emptied_chemicals(&picked.chem, state, allowed_mix_reservoirs_min_index);
     for i in 1..leaves.len() {
         let trial = leaves.get(i).unwrap();
-        let emptied = emptied_chemicals(&trial.chem,state);
+        let emptied = emptied_chemicals(&trial.chem,state, allowed_mix_reservoirs_min_index);
         if emptied > max_emptied {
             picked = trial;
             max_emptied = emptied;
@@ -538,7 +578,7 @@ fn compute_step(state:&mut ChemState, tree:&mut ChemTreeBranch, actions:&mut Vec
     for chem in &chems {
         let reservoir_index = state.find_chem(&chem.chemical).unwrap();
         let reservoir = state.get(reservoir_index);
-        if reservoir.contents.as_ref().unwrap().concrete_quantity.unwrap() == 0 {
+        if reservoir.contents.as_ref().unwrap().concrete_quantity.unwrap() == 0 && reservoir_index as u32 >= allowed_mix_reservoirs_min_index {
             if combine_reservoir.is_none() {
                 actions.push(Action::EjectDownTo{amount:chem.concrete_quantity.unwrap(), target:reservoir_index as u32 + 1});
                 combine_reservoir = Some(reservoir_index);
