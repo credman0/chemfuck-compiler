@@ -36,7 +36,7 @@ pub struct ChemState {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Reservoir {
-    contents:Option<ChemToken>,
+    pub contents:Option<ChemToken>,
     reservoir_size:ReservoirSize
 }
 

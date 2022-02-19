@@ -24,14 +24,14 @@ const ACETONE:&str = "($/3:*OIL;$/3:weldingfuel;$/3:oxygen;)";
 const ATRAZINE:&str = "($/3:chlorine;$/3:nitrogen;$/3:hydrogen;)";
 const PHENOL:&str = "($/3:*OIL;$/3:chlorine;$/3:water;)";
 const SALICYLIC_ACID:&str = "($/5:sodium;$/5:*PHENOL;$/5:carbon;$/5:oxygen;$/5:*SULFURIC_ACID;)";
-const PERFLUORODECALIN:&str = "($/2:hydrogen;$/2:*SALICYLIC_ACID;$/2:fluorine;)@374;";
+const PERFLUORODECALIN:&str = "($/2:hydrogen;$/2:*SALICYLIC;$/2:fluorine;)@374;";
 const PENTETIC_ACID:&str = "($/6:weldingfuel;$/6:chlorine;$/6:fluorine;$/6:*AMMONIA;$/6:*FORMALDEHYDE;$/6:*CYANIDE;)";
 const FORMALDEHYDE:&str = "($/2:ethanol;$/2:oxygen;$/2:silver;)@424;";
 const CYANIDE:&str = "($/1:*AMMONIA;$/1:*OIL;$/1:oxygen;)@374;";
 
 
 lazy_static!{
-    static ref SUB_MAP: HashMap<&'static str, &'static str> = [
+    pub static ref SUB_MAP: HashMap<&'static str, &'static str> = [
         ("FLUOROSULFURIC_ACID", FLUOROSULFURIC_ACID),
         ("METH", METH_FORMULA),
         ("AMMONIA", AMMONIA),
@@ -47,10 +47,10 @@ lazy_static!{
         ("ACETONE", ACETONE),
         ("ATRAZINE", ATRAZINE),
         ("PHENOL", PHENOL),
-        ("SALICYLIC_ACID", SALICYLIC_ACID),
+        ("SALICYLIC", SALICYLIC_ACID),
         ("PHENOL", PHENOL),
         ("PERFLUORODECALIN", PERFLUORODECALIN),
-        ("PENTETIC_ACID", PENTETIC_ACID),
+        ("PENTETIC", PENTETIC_ACID),
         ("FORMALDEHYDE", FORMALDEHYDE),
         ("CYANIDE", CYANIDE),
     ].iter().copied().collect();
