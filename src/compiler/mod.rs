@@ -1,5 +1,6 @@
 use crate::Action;
 use std::collections::HashMap;
+use structopt::StructOpt;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Command {
@@ -17,6 +18,12 @@ pub enum Command {
     Heat,
     Transfer,
     NoOp
+}
+
+#[derive(StructOpt, Debug)]
+pub struct CompilerFlags {
+    #[structopt(short, long)]
+    sideproduct_pills:bool
 }
 
 const ZERO:u32 = 0;
@@ -65,14 +72,14 @@ impl ProgramState {
     }
 }
 
-pub fn compile (actions:&Vec<Action>) -> Vec<Command> {
+pub fn compile (actions:&Vec<Action>, flags:&CompilerFlags) -> Vec<Command> {
     let (constants, scratch) = extract_constants(&actions);
     let pointer_position = 0;
     let mut state = ProgramState{constants, pointer_position, scratch:scratch};
     let mut commands = vec![];
     create_constants(&mut state, &mut commands);
     for action in actions {
-        create_commands_from_action(&mut commands, &mut state, action);
+        create_commands_from_action(&mut commands, &mut state, action, &flags);
     }
     return commands;
 }
@@ -133,7 +140,7 @@ fn extract_constants (actions:&Vec<Action>) -> (HashMap<u32,u32>, u32) {
     return (map, register_counter);
 }
 
-fn create_commands_from_action (commands:&mut Vec<Command>, state:&mut ProgramState, action:&Action) {
+fn create_commands_from_action (commands:&mut Vec<Command>, state:&mut ProgramState, action:&Action, flags:&CompilerFlags) {
     match *action {
         Action::Transfer{amount, source, target} => {
             commands.push(state.goto_constant(amount));
@@ -178,7 +185,11 @@ fn create_commands_from_action (commands:&mut Vec<Command>, state:&mut ProgramSt
             commands.push(Command::FromAx);
             commands.push(Command::Subtract(remaining));
             commands.push(Command::ToAx);
-            commands.push(state.goto_constant(MAKE_PILL));
+            if flags.sideproduct_pills {
+                commands.push(state.goto_constant(MAKE_PILL));
+            } else {
+                commands.push(state.goto_constant(EJECT));
+            }
             commands.push(Command::ToTx);
             commands.push(Command::Transfer);
         },
@@ -190,7 +201,11 @@ fn create_commands_from_action (commands:&mut Vec<Command>, state:&mut ProgramSt
             commands.push(Command::FromAx);
             commands.push(Command::Subtract(amount));
             commands.push(Command::ToAx);
-            commands.push(state.goto_constant(MAKE_PILL));
+            if flags.sideproduct_pills {
+                commands.push(state.goto_constant(MAKE_PILL));
+            } else {
+                commands.push(state.goto_constant(EJECT));
+            }
             commands.push(Command::ToTx);
             commands.push(Command::Transfer);
         },

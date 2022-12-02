@@ -101,8 +101,8 @@ impl Reservoir {
     }
 
     pub fn replace(&mut self, chem:&ChemToken) -> Result<(), String> {
-        if self.reservoir_size.get_size() < chem.size() {
-            self.reservoir_size = ReservoirSize::fit(chem.size());
+        if self.reservoir_size.get_size() < chem.combine_size() {
+            self.reservoir_size = ReservoirSize::fit(chem.combine_size());
         }
         self.contents = Some(chem.clone());
         return Ok(());
@@ -506,7 +506,7 @@ pub fn compute_actions(tree:&ChemTree, times_produced:u32) -> (Vec<Action>, Vec<
         compute_step(&mut state, &mut mut_tree, &mut actions, allowed_mix_reservoirs_min_index); // final mix step
         let output_chem = &tree.root.chem;
         let output_reservoir_index = state.find_chem(&output_chem.chemical).unwrap();
-        actions.push(Action::CreateBottle{target:output_reservoir_index as u32 + 1, amount:100});
+        actions.push(Action::CreatePill{target:output_reservoir_index as u32 + 1, amount:100});
         state.clear(output_reservoir_index);
         for i in allowed_mix_reservoirs_min_index..NUM_RESERVOIRS {
             state.clear(i as usize);

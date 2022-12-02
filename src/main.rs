@@ -8,6 +8,7 @@ mod compiler;
 
 use chemicals::{Chemical, ChemToken, NumberToken, NumberOperator};
 use calculator::{Action, ChemState};
+use compiler::CompilerFlags;
 
 // (Buf) Uncomment these lines to have the output buffered, this can provide
 // better performance but is not always intuitive behaviour.
@@ -32,6 +33,8 @@ struct Cli {
 enum Command {
     /// Calculate the compiled chemfuck code based on the input
     Calc{
+        #[structopt(flatten)]
+        flags:CompilerFlags,
         input:String
     },
     /// List known premade chem formulas that are available to substitute.
@@ -42,7 +45,7 @@ enum Command {
 fn main() {
     let args = Cli::from_args();
     match args.command {
-        Command::Calc {input} => {
+        Command::Calc {input, flags} => {
             let (chem, total_quantity) =  parser::parse(input);
             let chem = chem.unwrap();
             let tree = calculator::ChemTree::deconstruct(&chem);
@@ -51,7 +54,7 @@ fn main() {
             let (actions, sizes) = calculator::compute_actions(&tree, total_quantity);
             print_required_state(&sizes, &tree.initial_state);
             println!("{:?}\n", actions);
-            let commands = compiler::compile(&actions);
+            let commands = compiler::compile(&actions, &flags);
             println!("{:?}\n", commands);
             let code = compiler::to_bytecode(&commands);
             println!("{}", code);   

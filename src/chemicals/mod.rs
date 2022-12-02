@@ -110,7 +110,7 @@ impl ChemToken {
         }
     }
 
-    pub fn size(&self) -> u32 {
+    pub fn combine_size(&self) -> u32 {
         let mut sum = 0;
         if self.chemical.chemicals.is_empty() {
             sum += self.concrete_quantity.unwrap();
@@ -120,6 +120,10 @@ impl ChemToken {
             }
         }
         return sum;
+    }
+
+    pub fn size(&self) -> u32 {
+        return self.concrete_quantity.unwrap();
     }
 
     pub fn combinable (&self, other:&ChemToken) -> bool{
